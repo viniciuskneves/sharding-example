@@ -1,0 +1,40 @@
+# Runs demo 8 (demo-8-replicated-shards.sh) on a GitHub-hosted runner, so the output
+# can be read in the Actions tab without installing Docker locally.
+#
+# The script only PRINTS what happens. It does not check the results, so a
+# green run means "the demo ran to the end", not "the behaviour is correct".
+# Read the logs.
+
+name: "Demo 8: replicated shards"
+
+# Manual trigger only: the "Run workflow" button in the Actions tab, or
+# "gh workflow run demo-8-replicated-shards.yml" from a terminal. Nothing runs on push.
+on: workflow_dispatch
+
+# The job only needs to read the repository.
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    name: Run the replicated shards demo
+
+    # GitHub's Ubuntu runners ship with Docker, Docker Compose, bash and curl,
+    # which is everything the script needs. The Node.js and oha images are
+    # downloaded by Docker Compose when the script first uses them.
+    runs-on: ubuntu-latest
+
+    # Kill the job if it runs longer than this. The script waits for the
+    # containers to start without a time limit of its own, so this is the
+    # safety net.
+    timeout-minutes: 3
+
+    steps:
+      # Download the repository onto the runner.
+      - uses: actions/checkout@v6
+
+      # Stops and restarts one replica of a shard, repairs it, then repeats the
+      # failure with strict writes, and removes the containers.
+      # The results are this step's output.
+      - name: Run demo-8-replicated-shards.sh
+        run: ./demo-8-replicated-shards.sh
