@@ -1,0 +1,101 @@
+# Compose file for demo 6 (adding a shard): one router in front of FOUR
+# storage nodes, plus the load tester.
+#
+# All four nodes always run. The cluster "grows" when the router is told to
+# use the fourth one as well, through the NODES variable. How the router
+# picks the shard for a key is set with STRATEGY:
+#
+#   modulo -> hash(key) % number of nodes (as in demo 3)
+#   ring   -> consistent hashing
+#
+# This is not the default compose file name, so every command needs "-f":
+#
+# Three shards: STRATEGY=ring NODES=http://shard-a:8000,http://shard-b:8000,http://shard-c:8000 docker compose -f docker-compose.6-adding-a-shard.yml up -d --force-recreate
+# Add a fourth: STRATEGY=ring NODES=http://shard-a:8000,http://shard-b:8000,http://shard-c:8000,http://shard-d:8000 docker compose -f docker-compose.6-adding-a-shard.yml up -d router
+# Rebalance:    curl -X POST localhost:8000/rebalance
+# Stop:         docker compose -f docker-compose.6-adding-a-shard.yml down
+#
+# "up -d router" without --force-recreate replaces only the router, because
+# only its settings changed. The shards keep running and keep their data.
+#
+# Do not run this together with the compose files of the other demos: they
+# all use the same service names and the host ports 8000 to 8004.
+
+# Shared settings for every storage node. Compose ignores top-level keys that
+# start with "x-", so this block only exists to be reused: "&shard" names it,
+# and "<<: *shard" below pastes it into each service.
+x-shard: &shard
+  # Official Node.js 22 image on Alpine Linux (small). The code has no
+  # dependencies, so there is nothing to install and no Dockerfile to build.
+  image: node:22-alpine
+  # The process the container runs.
+  command: node /app/shard.js
+  # Mount shard.js from this folder into the container, read-only (":ro").
+  volumes:
+    - ./shard.js:/app/shard.js:ro
+
+# The two artificial limits of a node (see shard.js). Kept in one place so
+# every node is guaranteed to have the same ones.
+x-limits: &limits
+  # Room for 1000 keys per node.
+  MAX_KEYS: 1000
+  # 5 ms per write -> at most 200 writes per second.
+  WRITE_COST_MS: 5
+
+services:
+  router:
+    image: node:22-alpine
+    command: node /app/router.js
+    volumes:
+      - ./router.js:/app/router.js:ro
+    environment:
+      # How the router picks the shard for a key: "modulo" or "ring". Taken
+      # from your shell when you run "docker compose up"; "modulo" if unset.
+      STRATEGY: ${STRATEGY:-modulo}
+      # The shards the router uses. Taken from your shell; the first three if
+      # unset. Adding shard-d to this list is how the cluster grows.
+      NODES: ${NODES:-http://shard-a:8000,http://shard-b:8000,http://shard-c:8000}
+    # host:container. The router is http://localhost:8000 on your machine.
+    # It is the only address a client needs.
+    ports: ["8000:8000"]
+
+  # The service name doubles as the hostname the router uses to reach a node.
+  shard-a:
+    <<: *shard
+    environment:
+      # Label the node puts in every response.
+      NODE_NAME: shard-a
+      <<: *limits
+    # Published only so you can look at one node directly, e.g.
+    # curl localhost:8001/status. Clients are meant to use the router.
+    ports: ["8001:8000"]
+
+  shard-b:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-b
+      <<: *limits
+    ports: ["8002:8000"]
+
+  shard-c:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-c
+      <<: *limits
+    ports: ["8003:8000"]
+
+  shard-d:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-d
+      <<: *limits
+    ports: ["8004:8000"]
+
+  # oha, the load-testing CLI, packaged as a container so you do not have to
+  # install it. It runs inside the Compose network, which is why it addresses
+  # the router as http://router:8000 rather than localhost.
+  oha:
+    image: ghcr.io/hatoo/oha:1.17.0
+    # A profile keeps this service out of "docker compose up": it is not a
+    # server, it only runs on demand with "docker compose run --rm oha ...".
+    profiles: [tools]

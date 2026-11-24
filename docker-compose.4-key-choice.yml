@@ -1,0 +1,99 @@
+# Compose file for demo 4 (the key choice): one router in front of three
+# shards, plus the load tester.
+#
+# The nodes are the same as in every other demo, and all three are always in
+# use. What changes between the acts of the demo is HOW the router picks the
+# shard for a key, set with the STRATEGY variable:
+#
+#   modulo -> by the key's hash (as in demo 3)
+#   range  -> by the key's place in alphabetical order
+#
+# This is not the default compose file name, so every command needs "-f":
+#
+# By range:     STRATEGY=range docker compose -f docker-compose.4-key-choice.yml up -d --force-recreate
+# By hash:      STRATEGY=modulo docker compose -f docker-compose.4-key-choice.yml up -d --force-recreate
+# Newest keys:  docker compose -f docker-compose.4-key-choice.yml run --rm oha --no-tui -q 500 -n 2500 -c 1000 -t 1s -m PUT -d hello --rand-regex-url 'http://router:8000/kv/user-2[0-9]{3}'
+# One hot key:  docker compose -f docker-compose.4-key-choice.yml run --rm oha --no-tui -q 500 -n 2500 -c 1000 -t 1s -m PUT -d hello --rand-regex-url 'http://router:8000/kv/user-(1500|1500|1500|1500|[0-2][0-9]{3})'
+# Scan:         curl 'localhost:8000/scan?from=user-1000&to=user-1099'
+# Stop:         docker compose -f docker-compose.4-key-choice.yml down
+#
+# Do not run this together with the compose files of the other demos: they
+# all use the same service names and the host ports 8000 to 8003.
+
+# Shared settings for every storage node. Compose ignores top-level keys that
+# start with "x-", so this block only exists to be reused: "&shard" names it,
+# and "<<: *shard" below pastes it into each service.
+x-shard: &shard
+  # Official Node.js 22 image on Alpine Linux (small). The code has no
+  # dependencies, so there is nothing to install and no Dockerfile to build.
+  image: node:22-alpine
+  # The process the container runs.
+  command: node /app/shard.js
+  # Mount shard.js from this folder into the container, read-only (":ro").
+  volumes:
+    - ./shard.js:/app/shard.js:ro
+
+# The two artificial limits of a node (see shard.js). Kept in one place so
+# every node is guaranteed to have the same ones.
+x-limits: &limits
+  # Room for 1000 keys per node.
+  MAX_KEYS: 1000
+  # 5 ms per write -> at most 200 writes per second.
+  WRITE_COST_MS: 5
+
+services:
+  router:
+    image: node:22-alpine
+    command: node /app/router.js
+    volumes:
+      - ./router.js:/app/router.js:ro
+    environment:
+      # How the router picks the shard for a key. Taken from your shell when
+      # you run "docker compose up"; "modulo" if unset.
+      STRATEGY: ${STRATEGY:-modulo}
+      # Only used by the "range" strategy: where one shard's stretch of keys
+      # ends and the next one's begins. The demo's keys run from user-0000 to
+      # user-2999, so this gives each shard 1000 of them:
+      #   shard-a: user-0000 to user-0999
+      #   shard-b: user-1000 to user-1999
+      #   shard-c: user-2000 to user-2999
+      RANGE_SPLITS: user-1000,user-2000
+      # All three shards are always in use in this demo.
+      NODES: http://shard-a:8000,http://shard-b:8000,http://shard-c:8000
+    # host:container. The router is http://localhost:8000 on your machine.
+    # It is the only address a client needs.
+    ports: ["8000:8000"]
+
+  # The service name doubles as the hostname the router uses to reach a node.
+  shard-a:
+    <<: *shard
+    environment:
+      # Label the node puts in every response.
+      NODE_NAME: shard-a
+      <<: *limits
+    # Published only so you can look at one node directly, e.g.
+    # curl localhost:8001/status. Clients are meant to use the router.
+    ports: ["8001:8000"]
+
+  shard-b:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-b
+      <<: *limits
+    ports: ["8002:8000"]
+
+  shard-c:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-c
+      <<: *limits
+    ports: ["8003:8000"]
+
+  # oha, the load-testing CLI, packaged as a container so you do not have to
+  # install it. It runs inside the Compose network, which is why it addresses
+  # the router as http://router:8000 rather than localhost.
+  oha:
+    image: ghcr.io/hatoo/oha:1.17.0
+    # A profile keeps this service out of "docker compose up": it is not a
+    # server, it only runs on demand with "docker compose run --rm oha ...".
+    profiles: [tools]

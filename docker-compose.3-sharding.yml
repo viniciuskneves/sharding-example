@@ -1,0 +1,94 @@
+# Compose file for demo 3 (sharding): one router in front of three identical
+# storage nodes, plus the load tester.
+#
+# The nodes are the same as in demos 1 and 2, with the same limits. What is
+# new is the router's strategy: "modulo" gives each key to ONE node instead of
+# copying every key to all of them.
+#
+# All three nodes always start. Which of them the router actually USES is
+# decided by the NODES variable, so this one file serves both the "before"
+# (one node) and the "after" (three shards) of the demo.
+#
+# This is not the default compose file name, so every command needs "-f":
+#
+# One node:     NODES=http://shard-a:8000 docker compose -f docker-compose.3-sharding.yml up -d --force-recreate
+# Three shards: NODES=http://shard-a:8000,http://shard-b:8000,http://shard-c:8000 docker compose -f docker-compose.3-sharding.yml up -d --force-recreate
+# Traffic:      docker compose -f docker-compose.3-sharding.yml run --rm oha --no-tui -q 500 -n 2500 -c 1000 -t 1s -m PUT -d hello --rand-regex-url 'http://router:8000/kv/user-[1-9][0-9]{2}'
+# Fill it up:   docker compose -f docker-compose.3-sharding.yml run --rm oha --no-tui -n 3000 -c 50 -m PUT -d hello --rand-regex-url 'http://router:8000/kv/[a-z]{12}'
+# Stop:         docker compose -f docker-compose.3-sharding.yml down
+#
+# Do not run this together with the compose files of demos 1 and 2: they all
+# use the same service names and the host ports 8000 to 8003.
+
+# Shared settings for every storage node. Compose ignores top-level keys that
+# start with "x-", so this block only exists to be reused: "&shard" names it,
+# and "<<: *shard" below pastes it into each service.
+x-shard: &shard
+  # Official Node.js 22 image on Alpine Linux (small). The code has no
+  # dependencies, so there is nothing to install and no Dockerfile to build.
+  image: node:22-alpine
+  # The process the container runs.
+  command: node /app/shard.js
+  # Mount shard.js from this folder into the container, read-only (":ro").
+  volumes:
+    - ./shard.js:/app/shard.js:ro
+
+# The two artificial limits of a node (see shard.js). Kept in one place so
+# every node is guaranteed to have the same ones.
+x-limits: &limits
+  # Room for 1000 keys per node.
+  MAX_KEYS: 1000
+  # 5 ms per write -> at most 200 writes per second.
+  WRITE_COST_MS: 5
+
+services:
+  router:
+    image: node:22-alpine
+    command: node /app/router.js
+    volumes:
+      - ./router.js:/app/router.js:ro
+    environment:
+      # How requests are spread over the nodes. "modulo" is sharding: each
+      # key belongs to one node, picked by hash(key) % number of nodes.
+      # With a single node in NODES every key belongs to that node.
+      STRATEGY: modulo
+      # Which nodes the router uses. Taken from your shell when you run
+      # "docker compose up"; a single node if unset.
+      NODES: ${NODES:-http://shard-a:8000}
+    # host:container. The router is http://localhost:8000 on your machine.
+    # It is the only address a client needs.
+    ports: ["8000:8000"]
+
+  # The service name doubles as the hostname the router uses to reach a node.
+  shard-a:
+    <<: *shard
+    environment:
+      # Label the node puts in every response.
+      NODE_NAME: shard-a
+      <<: *limits
+    # Published only so you can look at one node directly, e.g.
+    # curl localhost:8001/status. Clients are meant to use the router.
+    ports: ["8001:8000"]
+
+  shard-b:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-b
+      <<: *limits
+    ports: ["8002:8000"]
+
+  shard-c:
+    <<: *shard
+    environment:
+      NODE_NAME: shard-c
+      <<: *limits
+    ports: ["8003:8000"]
+
+  # oha, the load-testing CLI, packaged as a container so you do not have to
+  # install it. It runs inside the Compose network, which is why it addresses
+  # the router as http://router:8000 rather than localhost.
+  oha:
+    image: ghcr.io/hatoo/oha:1.17.0
+    # A profile keeps this service out of "docker compose up": it is not a
+    # server, it only runs on demand with "docker compose run --rm oha ...".
+    profiles: [tools]
