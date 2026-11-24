@@ -512,6 +512,34 @@ What it shows:
 This is the shape of most real sharded databases: a router, shards for
 scale, and a small replicated group behind every shard.
 
+### Without Docker: GitHub Actions
+
+Each demo has its own workflow, which runs the script on a GitHub runner:
+
+| Workflow | Runs | Example of a successful run |
+|---|---|---|
+| [Demo 1: the write limit](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-1-write-limit.yml) | `demo-1-write-limit.sh` | [run 45447764911](https://github.com/viniciuskneves/sharding-example/actions/runs/45447764911/job/138636143482) |
+| [Demo 2: the storage limit](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-2-storage-limit.yml) | `demo-2-storage-limit.sh` | [run 45447772038](https://github.com/viniciuskneves/sharding-example/actions/runs/45447772038/job/138636169069) |
+| [Demo 3: sharding](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-3-sharding.yml) | `demo-3-sharding.sh` | [run 45447779108](https://github.com/viniciuskneves/sharding-example/actions/runs/45447779108/job/138636196910) |
+| [Demo 4: the key choice matters](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-4-key-choice.yml) | `demo-4-key-choice.sh` | [run 45447786970](https://github.com/viniciuskneves/sharding-example/actions/runs/45447786970/job/138636224406) |
+| [Demo 5: directory-based sharding](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-5-directory.yml) | `demo-5-directory.sh` | [run 45447794203](https://github.com/viniciuskneves/sharding-example/actions/runs/45447794203/job/138636250760) |
+| [Demo 6: adding a shard](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-6-adding-a-shard.yml) | `demo-6-adding-a-shard.sh` | [run 45447801834](https://github.com/viniciuskneves/sharding-example/actions/runs/45447801834/job/138636285087) |
+| [Demo 7: across shards, and when one fails](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-7-across-shards.yml) | `demo-7-across-shards.sh` | [run 45447809469](https://github.com/viniciuskneves/sharding-example/actions/runs/45447809469/job/138636307142) |
+| [Demo 8: replicated shards](https://github.com/viniciuskneves/sharding-example/actions/workflows/demo-8-replicated-shards.yml) | `demo-8-replicated-shards.sh` | [run 45447819316](https://github.com/viniciuskneves/sharding-example/actions/runs/45447819316/job/138636337962) |
+| `.github/workflows/demo-*.yml` | One manually triggered GitHub Actions workflow per demo |
+
+To find the results in a run, open its job and expand the step named after
+the script, for example **Run demo-1-write-limit.sh**. The output is the same
+as running the script locally.
+
+GitHub deletes run logs after 90 days, so the example links above will stop
+showing output eventually. To get a fresh run, open a workflow from the table
+and use its **Run workflow** button, or run for example
+`gh workflow run demo-1-write-limit.yml`. The workflows only start manually.
+
+The scripts print what happens but do not check it, so a green run only means
+the demo ran to the end.
+
 ## Playing with it by hand
 
 Each demo has its own compose file, so every command needs `-f`. Run one
